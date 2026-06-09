@@ -1,0 +1,200 @@
+#==========================================================================================================================================================
+steps1
+
+module load cutadapt_hsiaochiao/2.10
+
+ilist_R1=(/bucket/IshikawaU/HsiaoChiao/20221124_ATACseq_in_vivo_2nd/rawdata/*R1*.fastq.gz)
+ilist_R2=(/bucket/IshikawaU/HsiaoChiao/20221124_ATACseq_in_vivo_2nd/rawdata/*R2*.fastq.gz)
+
+input_R1=${ilist_R1[$SLURM_ARRAY_TASK_ID]}
+input_R2=${ilist_R2[$SLURM_ARRAY_TASK_ID]}
+
+output_forward=$(basename -s _001.fastq.gz $input_R1).fq.gz
+output_reverse=$(basename -s _001.fastq.gz $input_R2).fq.gz
+
+ADAPTER_FWD=(CTGTCTCTTATACACATCTCCGAGCCCACGAGAC)
+ADAPTER_REV=(CTGTCTCTTATACACATCTGACGCTGCCGACGA)
+
+cutadapt -q 25 -a $ADAPTER_FWD -A $ADAPTER_REV --minimum-length 30 -o $output_forward -p $output_reverse $input_R1 $input_R2
+
+#==========================================================================================================================================================
+steps2
+
+module load bowtie2/2.3.4.3
+
+dataPath=/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/03_cutadapt
+
+ilist_R1=($dataPath/*_R1.fq.gz)
+ilist_R2=($dataPath/*_R2.fq.gz)
+input_R1=${ilist_R1[$SLURM_ARRAY_TASK_ID]}
+input_R2=${ilist_R2[$SLURM_ARRAY_TASK_ID]}
+
+output=$(basename -s _R1.fq.gz $input_R1)
+
+bowtie2 \
+-X 2000 \
+--very-sensitive \
+--threads 30 \
+-x /bucket/IshikawaU/HsiaoChiao/rync_sango/Hsiaochiao/mm10/Mus_musculus/UCSC/mm10/Sequence/Bowtie2Index/genome \
+-1 $input_R1 \
+-2 $input_R2 \
+-S ${projPath}/sam/$output.sam &> ${projPath}/bowtie2_summary/$output.txt
+
+#==========================================================================================================================================================
+steps3
+
+module load samtools/1.9
+
+ilist=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/04_Bowtie2_cutadapt/sam/*sam)
+input=${ilist[$SLURM_ARRAY_TASK_ID]}
+output=$(basename -s .sam $input)_mapped.bam
+
+grep -v 'chrM' $input | samtools view -b -h -q 30 -F 4 -f 0x2 -> $output
+
+#==========================================================================================================================================================
+steps4
+
+module load picard/2.7.0
+
+#picard=(/apps/free72/picard/2.7.0/bin/picard.jar)
+
+ilist=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/05_bam_Bowtie2_cutadapt/*.bam)
+input_bam=${ilist[$SLURM_ARRAY_TASK_ID]}
+sorted_bam=$(basename -s _mapped.bam $input_bam)_sorted.bam
+
+#java -jar $picard SortSam \
+picard SortSam \
+I=$input_bam \
+O=$sorted_bam \
+SORT_ORDER=coordinate
+
+
+#==========================================================================================================================================================
+steps5
+
+module load picard/2.7.0
+
+#picard=(/apps/free72/picard/2.7.0/bin/picard.jar)
+
+ilist=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/06_sort_bam_Bowtie2_cutadapt/*.bam)
+input_bam=${ilist[$SLURM_ARRAY_TASK_ID]}
+output=$(basename -s _sorted.bam $input_bam)_no_duplicates.bam
+outputM=$(basename -s _sorted.bam $input_bam)_marked_dup_metrics.txt
+
+#java -jar $picard MarkDuplicates \
+
+picard MarkDuplicates \
+I=$input_bam \
+O=$output \
+M=$outputM \
+REMOVE_DUPLICATES=true
+
+
+#==========================================================================================================================================================
+steps6
+
+module load samtools/1.9
+
+inputfile1=(Day3_activated_OT2_cell_from_iLN_WT_JunBflfl_1*.bam)
+inputfile2=(Day3_activated_OT2_cell_from_iLN_WT_2*bam)
+inputfile3=(Day3_activated_OT2_cell_from_iLN_WT_3*bam)
+inputfile4=(Day3_activated_OT2_cell_from_iLN_KO_JunBflflCD4cre_1*bam)
+inputfile5=(Day3_activated_OT2_cell_from_iLN_KO_2*bam)
+inputfile6=(Day3_activated_OT2_cell_from_iLN_KO_3*bam)
+
+input_bam1=$inputdir$inputfile1
+input_bam2=$inputdir$inputfile2
+input_bam3=$inputdir$inputfile3
+input_bam4=$inputdir$inputfile4
+input_bam5=$inputdir$inputfile5
+input_bam6=$inputdir$inputfile6
+
+samtools merge -@ 32 $output $input_bam1 $input_bam2 $input_bam3 $input_bam4 $input_bam5 $input_bam6
+
+
+#==========================================================================================================================================================
+steps7
+
+module load MACS2/v2.2.7.1
+
+ilist=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/10_different_peakcalling_method/merge_different_files/01_different_merged_bam_files/*.bam)
+input_bam=${ilist[$SLURM_ARRAY_TASK_ID]}
+output=$(basename -s .bam $input_bam)_macs2
+
+macs2 callpeak -t $input_bam --nomodel --keep-dup all -q 0.01 --shift -100 --extsize 200 --call-summits -g mm -n $output
+
+#==========================================================================================================================================================
+steps8
+
+ilist=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/10_different_peakcalling_method/merge_different_files/02_peakcalling_macs2/*.narrowPeak)
+input_narrowPeak=${ilist[$SLURM_ARRAY_TASK_ID]}
+
+output=$(basename -s .narrowPeak $input_narrowPeak)_uniq.narrowPeak
+
+awk 'OFS="\t" {print $0, $1"."$2+1"."$3}' $input_narrowPeak | sort -u -k11 |awk 'OFS="\t" {$11="";print}'> $output
+
+
+#==========================================================================================================================================================
+steps9
+
+module load homer/v4.11
+
+bed_path=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/10_different_peakcalling_method/merge_different_files/02_peakcalling_macs2/remove_duplicate/)
+bed_file=(Day3_activated_OT2_cell_iLN_WT_KO_merge_macs2_peaks_uniq.narrowPeak)
+
+tag_path=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/08_generate_bedGraph_for_UCSC_homer/)
+tag_file1=(Day3_activated_OT2_cell_from_iLN_WT_JunBflfl_1_S4_L001)
+tag_file2=(Day3_activated_OT2_cell_from_iLN_WT_2_S5_L001)
+tag_file3=(Day3_activated_OT2_cell_from_iLN_WT_3_S6_L001)
+tag_file4=(Day3_activated_OT2_cell_from_iLN_KO_JunBflflCD4cre_1_S7_L001)
+tag_file5=(Day3_activated_OT2_cell_from_iLN_KO_2_S8_L001)
+tag_file6=(Day3_activated_OT2_cell_from_iLN_KO_3_S9_L001)
+
+outdir=(.)
+outname=$(basename -s .narrowPeak $bed_file)_annotated_uniqPeak_tag_given.narrowPeak
+output=$outdir/$outname
+
+annotatePeaks.pl $bed_path$bed_file mm10 -size given -d $tag_path$tag_file1 $tag_path$tag_file2 $tag_path$tag_file3 $tag_path$tag_file4 $tag_path$tag_file5 
+$tag_path$tag_file6 > $output
+
+#==========================================================================================================================================================
+step 10
+
+module load homer/v4.11
+module load samtools/1.9
+
+ilist=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/07_noduplicate_sort_bam_Bowtie2_cutadapt/*bam)
+input=${ilist[$SLURM_ARRAY_TASK_ID]}
+output=$(basename -s _no_duplicates.bam $input)
+
+makeTagDirectory $output $input
+
+#==========================================================================================================================================================
+steps11
+module load homer/v4.11
+module load samtools/1.9
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/08_generate_bedGraph_for_UCSC_homer/*_L001)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/08_generate_bedGraph_for_UCSC_homer/upload_to_UCSC/)
+outputname=ATACseq20230207_$(basename $input)
+
+makeUCSCfile $input -o $outputdir$outputname
+
+#==========================================================================================================================================================
+steps12
+
+module load homer/v4.11
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/08_generate_bedGraph_for_UCSC_homer/*_L001)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(/flash/IshikawaU/HsiaoChiao/ATACseq20230207/process/09_generate_bigWig_for_UCSC_homer/BigWig/)
+outputname=$(basename $input)_ATACseq.bigWig
+outputname1=$(basename $input)_ATACseq_trackInfo.txt
+
+makeUCSCfile $input -o $outputdir$outputname -bigWig /flash/IshikawaU/HsiaoChiao/Hatton_cellreports_2019/ATAC-seq/process/my_process/09.1_genetat_bigWing/mm10.chrom.sizes 
+-fsize 1e20 > $$outputdir$outputname1
+
+

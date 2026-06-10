@@ -1,0 +1,13 @@
+#==========================================================================================================================================================
+
+module load homer/v4.11
+
+ilist=(/flash/IshikawaU/HsiaoChiao/ATACseq20200123/process/08_different_peakcalling_method/merge_different_files/08_motif_thesis/02_prepare_bed_files/Log2FC1_FDR0.05/*bed)
+input_bed=${ilist[$SLURM_ARRAY_TASK_ID]}
+
+out=(/flash/IshikawaU/HsiaoChiao/ATACseq20200123/process/08_different_peakcalling_method/merge_different_files/08_motif_thesis/03_homer_findMotifsGenome/Log2FC1_FDR0.05/size_200/)
+output=$(basename -s .bed $input_bed)
+out_dir=$out$output
+
+findMotifsGenome.pl $input_bed mm10 $out_dir -size 200 -p 32
+

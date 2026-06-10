@@ -1,0 +1,293 @@
+---
+title: "density plot for Chipseq"
+output: html_document
+date: '2024-1-8'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#plot label plot
+#figure 5a-c
+```{r warning=FALSE, message=FALSE, results='hold'}
+# Directory containing the files
+dir <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/00_All_data_and_script_for_manuscript/06_figure5_Chiseq_BATF_SRG3_MLL/Figure5a_5b_Rscript/data"
+
+# Output directory for plots
+output_dir <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/00_All_data_and_script_for_manuscript/06_figure5_Chiseq_BATF_SRG3_MLL/Figure5a_5b_Rscript/plot"
+
+# List of files to process
+files <- c(
+  "matrix_ATAC_bed_log2FCless1_FDR0.05_BRG1.txt",
+  "matrix_ATAC_bed_log2FCless1_FDR0.05_SRG3.txt",
+  "matrix_ATAC_bed_log2FCless1_FDR0.05_MLL4.txt",
+  "matrix_ATAC_bed_log2FCless1_FDR0.05_WDR5.txt",
+  "matrix_BATF_24hr_bed_WT_JunBKO_1k.txt",
+  "matrix_JunB_less_ACRs_aBATF_WT_JunBKO.txt"
+)
+
+# Function to process each file
+process_file <- function(filename, dir, output_dir) {
+
+  cat("Processing:", filename, "\n")
+
+  # Read matrix
+  original_df <- read.table(
+    file.path(dir, filename),
+    sep = "\t",
+    quote = "",
+    header = TRUE,
+    check.names = FALSE
+  )
+
+  cat("Dimension:", dim(original_df), "\n")
+
+  # Each sample contains 200 bins
+  bins_per_sample <- 200
+
+  # Number of samples
+  n_samples <- ncol(original_df) / bins_per_sample
+
+  if (n_samples != 6) {
+    stop(
+      paste(
+        "Expected 6 samples (1200 columns), found",
+        n_samples,
+        "samples"
+      )
+    )
+  }
+
+  # Calculate mean signal across all peaks
+  means_list <- lapply(
+    seq(1, ncol(original_df), by = bins_per_sample),
+    function(start_col) {
+
+      end_col <- start_col + bins_per_sample - 1
+
+      colMeans(
+        original_df[, start_col:end_col, drop = FALSE],
+        na.rm = TRUE
+      )
+    }
+  )
+
+  mean_df <- as.data.frame(do.call(cbind, means_list))
+
+  colnames(mean_df) <- c(
+    "wt1", "wt2", "wt3",
+    "ko1", "ko2", "ko3"
+  )
+
+  # Average replicates
+  avg_df <- data.frame(
+    WT = rowMeans(mean_df[, c("wt1", "wt2", "wt3")], na.rm = TRUE),
+    KO = rowMeans(mean_df[, c("ko1", "ko2", "ko3")], na.rm = TRUE)
+  )
+
+  # Create title
+  plot_title <- gsub("matrix_", "", filename)
+  plot_title <- gsub("\\.txt$", "", plot_title)
+  plot_title <- gsub("_", " ", plot_title)
+
+  # Output file
+  plot_file <- file.path(
+    output_dir,
+    paste0(
+      "plot_",
+      gsub(" ", "_", plot_title),
+      "_profile.png"
+    )
+  )
+
+  dir.create(
+    output_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+
+  # Plot
+  png(
+    plot_file,
+    width = 1200,
+    height = 1000,
+    res = 300
+  )
+
+  par(mar = c(5, 5, 3, 2))
+
+  matplot(
+    x = 1:nrow(avg_df),
+    y = avg_df,
+    type = "l",
+    lty = 1,
+    lwd = 3,
+    col = c("blue", "red"),
+    xaxt = "n",
+    xlab = "",
+    ylab = "Mean signal",
+    main = plot_title,
+    ylim = range(avg_df, na.rm = TRUE)
+  )
+
+  axis(
+    1,
+    at = c(1, 100, 200),
+    labels = c("-1 kb", "Center", "+1 kb")
+  )
+
+  legend(
+    "topright",
+    legend = c("WT", "KO"),
+    col = c("blue", "red"),
+    lwd = 3,
+    bty = "n"
+  )
+
+  box()
+
+  dev.off()
+
+  cat("Saved:", plot_file, "\n\n")
+}
+
+# Run all files
+for (file in files) {
+  process_file(file, dir, output_dir)
+}
+
+
+
+```
+
+
+#figure 5d
+```{r warning=FALSE, message=FALSE, results='hold'}
+# Directory containing the files
+dir <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/00_All_data_and_script_for_manuscript/06_figure5_Chiseq_BATF_SRG3_MLL/Figure5a_5b_Rscript/data"
+
+# Output directory for plots
+output_dir <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/00_All_data_and_script_for_manuscript/06_figure5_Chiseq_BATF_SRG3_MLL/Figure5a_5b_Rscript/plot"
+
+# List of files to process
+files <- c(
+  "matrix_ATAC_bed_log2FCmore1_FDR0.05_BRG1.txt",
+  "matrix_ATAC_bed_log2FCmore1_FDR0.05_SRG3.txt",
+  "matrix_ATAC_bed_log2FCmore1_FDR0.05_MLL4.txt",
+  "matrix_ATAC_bed_log2FCmore1_FDR0.05_WDR5.txt"
+)
+
+process_file <- function(filename, dir, output_dir) {
+
+  cat("Processing:", filename, "\n")
+
+  original_df <- read.table(
+    file.path(dir, filename),
+    sep = "\t",
+    quote = "",
+    header = TRUE,
+    check.names = FALSE
+  )
+
+  cat("Dimension:", dim(original_df), "\n")
+
+  bins_per_sample <- 1000
+
+  means_list <- lapply(
+    seq(1, ncol(original_df), by = bins_per_sample),
+    function(start_col) {
+
+      end_col <- start_col + bins_per_sample - 1
+
+      colMeans(
+        original_df[, start_col:end_col, drop = FALSE],
+        na.rm = TRUE
+      )
+    }
+  )
+
+  mean_df <- as.data.frame(do.call(cbind, means_list))
+
+  colnames(mean_df) <- c(
+    "wt1", "wt2", "wt3",
+    "ko1", "ko2", "ko3"
+  )
+
+  avg_df <- data.frame(
+    WT = rowMeans(mean_df[, c("wt1", "wt2", "wt3")], na.rm = TRUE),
+    KO = rowMeans(mean_df[, c("ko1", "ko2", "ko3")], na.rm = TRUE)
+  )
+
+  plot_title <- gsub(
+    "matrix_ATAC_bed_log2FCmore1_FDR0.05_",
+    "",
+    filename
+  )
+
+  plot_title <- gsub("\\.txt$", "", plot_title)
+
+  plot_file <- file.path(
+    output_dir,
+    paste0(
+      "plot_ATAC_bed_log2FCmore1_FDR0.05_",
+      plot_title,
+      "_profile.png"
+    )
+  )
+
+  dir.create(
+    output_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+
+  png(
+    plot_file,
+    width = 1200,
+    height = 1000,
+    res = 300
+  )
+
+  par(mar = c(5, 5, 3, 2))
+
+  matplot(
+    x = 1:nrow(avg_df),
+    y = avg_df,
+    type = "l",
+    lwd = 3,
+    lty = 1,
+    col = c("blue", "red"),
+    xaxt = "n",
+    xlab = "",
+    ylab = "Mean signal",
+    main = plot_title,
+    ylim = range(avg_df, na.rm = TRUE)
+  )
+
+  axis(
+    1,
+    at = c(1, 500, 1000),
+    labels = c("-5 kb", "Center", "+5 kb")
+  )
+
+  legend(
+    "topright",
+    legend = c("WT", "KO"),
+    col = c("blue", "red"),
+    lwd = 3,
+    bty = "n"
+  )
+
+  box()
+
+  dev.off()
+
+  cat("Saved:", plot_file, "\n\n")
+}
+
+for (file in files) {
+  process_file(file, dir, output_dir)
+}
+```
+

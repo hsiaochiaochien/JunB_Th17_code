@@ -1,0 +1,61 @@
+
+step: generate known motif bed files
+module load bedtools/v2.29.2
+
+motif_bed=(/flash/IshikawaU/HsiaoChiao/ATACseq20200123/process/08_different_peakcalling_method/merge_different_files/09_motif_bedtool_check_percentage/01_data/02_homer_scanMotifGenomeWide/*_mm10.bed)
+input_bed=${motif_bed[$SLURM_ARRAY_TASK_ID]}
+
+
+data_dir=(/flash/IshikawaU/HsiaoChiao/ATACseq20200123/process/08_different_peakcalling_method/merge_different_files/09_motif_bedtool_check_percentage/01_data/03_atac_bed_file/)
+ATAC_file=(ATACseq_Th17_23_uniqPeak_given_deseq2_FDR0.05_log2FC_higer_than_1_ko.bed)
+
+
+ATACseq=($data_dir$ATAC_file)
+
+output=$(basename -s .motif $input_bed)_intersect_atac_ko_high_file.bed
+
+
+bedtools intersect \
+-a $ATACseq \
+-b $input_bed \
+-wa \
+> $output
+
+#==========================================================================================================================================================
+step: remove_duplicate
+
+ilist=(./*high_file.bed)
+input=${ilist[$SLURM_ARRAY_TASK_ID]}
+
+output=$(basename -s .bed $input)_uniq.bed
+
+sort -u $input > $output
+
+
+#==========================================================================================================================================================
+step:add_trackname_to_first_line_for_upload_to_ucsc
+
+ifiles=(/flash/IshikawaU/HsiaoChiao/scanMotifGenomeWide/*.bed)
+input=${ifiles[$SLURM_ARRAY_TASK_ID]}
+output=$(basename -s .bed $input)
+
+
+sed -i "1s|^|track type=bed name=\"$output\"\n|" $input
+
+#==========================================================================================================================================================
+
+step: find motif
+
+module load homer/v4.11
+
+ilist=(/flash/IshikawaU/HsiaoChiao/ATACseq20200123/process/08_different_peakcalling_method/merge_different_files/09_motif_Nr4a1_bedtool_check_percentage/01_data/01_motif_file/*.motif)
+
+input=${ilist[$SLURM_ARRAY_TASK_ID]}
+
+output=$(basename -s .motif $input)_mm10.bed
+
+scanMotifGenomeWide.pl $input mm10 -bed > $output
+
+
+#==========================================================================================================================================================
+

@@ -1,0 +1,166 @@
+#==========================================================================================================================================================
+
+#==========================================================================================================================================================
+#==========================================================================================================================================================
+#==========================================================================================================================================================
+#==========================================================================================================================================================
+#==========================================================================================================================================================
+step: bowtie
+
+module load bowtie/1.1.2
+
+ilist=(/work/IshikawaU/Hsiaochiao/Hasan_NatCommun_8_15628_2017/Chip-seq/process_from_koizumi/2.trimmomatic/*.fq.gz)
+
+input=${ilist[$SLURM_ARRAY_TASK_ID]}
+
+output=$(basename -s .fq.gz $input)
+
+bowtie \
+--threads 8 \
+-a --strata --best -m 1 -v 2 \
+-S \
+/work/IshikawaU/Hsiaochiao/mm10/Mus_musculus/UCSC/mm10/Sequence/BowtieIndex/genome \
+<(zcat $input) \
+> $output.sam
+
+
+#==========================================================================================================================================================
+step:homer_makeUCSCfile.sh
+
+module load homer/v4.11
+module load samtools/1.9
+
+mkdir -p ./01_bedGraph_fragLength_given_res_10_atac
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/Hasan_NatCommun_8_15628_2017/Chip-seq/process_from_koizumi/5.1.homer_bowtie1_after_trimmomatic/*_Th17_23)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(.)
+outputname=$(basename $input).bedGraph
+
+makeUCSCfile $input -fragLength given -res 10 > $outputdir/01_bedGraph_fragLength_given_res_10_atac/$outputname
+
+
+
+#==========================================================================================================================================================
+step: sort_bedGraph.sh
+mkdir -p ./02_bedGraph_fragLength_given_res_10_sorted_atac
+
+idirectory=(./01_bedGraph_fragLength_given_res_10_atac/*.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(.)
+outputname=$(basename -s .bedGraph $input)_sorted.bedGraph
+
+sort -k1,1 -k2,2n $input > $outputdir/02_bedGraph_fragLength_given_res_10_sorted_atac/$outputname
+
+#==========================================================================================================================================================
+step : sed_remove_track_line.sh
+
+idirectory=(./02_bedGraph_fragLength_given_res_10_sorted_atac/*_sorted.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+#remove track line (now at the end of sort files)
+sed -i '$d' $input
+
+#==========================================================================================================================================================
+
+step:bedClip_remove_extensions_beyond_chromosomes
+
+mkdir -p ./04_bedGraph_fragLength_given_res_10_sorted_atac_final
+
+Path_to_UCSCtools=(/apps/unit/IshikawaU/UCSC_tools)
+mm10chrsizes=(/apps/unit/IshikawaU/UCSC_tools/mm10.chrom.sizes)
+
+#fix extensions beyond chromosomes > removes entry
+#bedClip [options] input.bed chrom.sizes output.bed
+
+idirectory=(./02_bedGraph_fragLength_given_res_10_sorted_atac/*sorted.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(.)
+outputname=$(basename -s _sorted.bedGraph $input)_sorted2.bedGraph
+
+$Path_to_UCSCtools/bedClip $input $mm10chrsizes $outputdir/04_bedGraph_fragLength_given_res_10_sorted_atac_final/$outputname
+
+
+
+#==========================================================================================================================================================
+step:
+
+Path_to_UCSCtools=(/apps/unit/IshikawaU/UCSC_tools)
+mm10chrsizes=(/apps/unit/IshikawaU/UCSC_tools/mm10.chrom.sizes)
+
+idirectory=(../07_homer_generate_bedgraph_JunB_BATF_IRF4/04_bedGraph_fragLength_given_res_10_sorted_atac_final/*_sorted2.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(.)
+outputname=$(basename -s _sorted2.bedGraph $input).bw
+
+$Path_to_UCSCtools/bedGraphToBigWig $input $mm10chrsizes $outputdir/01_bigWig_fragLength_given_res_10/$outputname
+
+
+#==========================================================================================================================================================
+step: 
+module load deeptools/v3.5.1
+
+path_file_bed=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/07.1_deeptools_heatmap_JunB_dependent_atac_histone_exp114_new/03_differential_bed_file_atac/log2FC_based/*.bed)
+input_bed=${path_file_bed[$SLURM_ARRAY_TASK_ID]}
+output=$(basename -s .bed $input_bed)_bed_ATAC_JunB_BATF_IRF4_1k.gz
+
+k=1000
+
+path_file_Chip_bigWig=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/07_deeptools_heatmap_JunB_dependent_atac_histone/08_generate_bigWig_JunB_BATF_IRF4/01_bigWig_fragLength_given_res_10)
+JunB_BigWig=(JunB_Th17_23.bw)
+BATF_BigWig=(BATF_Th17_23.bw)
+IRF4_BigWig=(IRF4_Th17_23.bw)
+
+path_file_bigWig=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/06_deeptools_heatmap/02_generate_bigWig/01_bigWig_fragLength_given_res_10)
+bigWig_1=(Cut_and_Run_48hr_09_Th1723_H3K4me1_WT1_S93.bw)
+bigWig_3=(Cut_and_Run_48hr_11_Th1723_H3K4me1_JunBKO1_S95.bw)
+bigWig_5=(Cut_and_Run_48hr_05_Th1723_H3K27me3_WT1_S89.bw)
+bigWig_7=(Cut_and_Run_48hr_07_Th1723_H3K27me3_JunBKO1_S91.bw)
+bigWig_9=(Cut_and_Run_48hr_01_Th1723_H3K4me3_WT1_S85.bw)
+bigWig_11=(Cut_and_Run_48hr_03_Th1723_H3K4me3_JunBKO1_S87.bw)
+bigWig_13=(Cut_and_Run_48hr_13_Th1723_H3K27ac_WT1_S97.bw)
+bigWig_15=(Cut_and_Run_48hr_15_Th1723_H3K27ac_JunBKO1_S99.bw)
+
+path_file_atac_BigWig=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/07_deeptools_heatmap_JunB_dependent_atac_histone/02_generate_bigWig_atac/01_bigWig_fragLength_given_res_10)
+ATAC_BigWig_2=(ATAC_Th17_23_WT_ATAC_2_S7.bw)
+ATAC_BigWig_4=(ATAC_Th17_23_KO_ATAC_2_S8.bw)
+
+computeMatrix reference-point -S \
+                                $path_file_atac_BigWig/$ATAC_BigWig_2\
+                                $path_file_atac_BigWig/$ATAC_BigWig_4\
+                                $path_file_Chip_bigWig/$JunB_BigWig\
+                                $path_file_Chip_bigWig/$BATF_BigWig\
+                                $path_file_Chip_bigWig/$IRF4_BigWig\
+                                -R $input_bed \
+                                -a $k \
+                                -b $k \
+                                --referencePoint center \
+                                -p 32 \
+                                --skipZeros \
+                                --missingDataAsZero \
+                                -o $output
+
+
+#==========================================================================================================================================================
+
+module load deeptools/v3.5.1.new
+
+ilist=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/07.1_deeptools_heatmap_JunB_dependent_atac_histone_exp114_new/09_deeptool_computeMatri_JunBATAC_JunB_BATF_IRF4/log2FC_based/*1k.gz)
+input_file=${ilist[$SLURM_ARRAY_TASK_ID]}
+
+output=$(basename -s .gz $input_file).png
+
+plotHeatmap  -m $input_path/$input_file \
+                --colorMap Reds \
+                --samplesLabel 'ATAC_WT' 'ATAC_KO' 'JunB' 'BATF' 'IRF4'\
+                --regionsLabel 'peaks' \
+                -out $output
+#==========================================================================================================================================================
+
+
+
+

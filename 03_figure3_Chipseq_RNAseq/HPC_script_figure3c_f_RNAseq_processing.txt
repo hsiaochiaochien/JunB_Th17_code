@@ -1,0 +1,5 @@
+ml bioinfo-ugrp-modules
+ml Nextflow2/22.10.1
+
+nextflow run nf-core/rnaseq -profile oist --input sample_sheet.csv --genome GRCm38 --outdir /flash/IshikawaU/HsiaoChiao/RNAseq_Th1723_timepoint_ID447/process_sbatch/output
+

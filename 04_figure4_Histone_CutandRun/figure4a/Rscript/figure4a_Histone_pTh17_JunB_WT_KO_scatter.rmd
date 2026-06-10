@@ -1,0 +1,363 @@
+---
+title: "Histone_modification_scatter_v1"
+output: html_document
+date: '2024-01-29'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Library
+```{r warning=FALSE, message=FALSE, results='hold'}
+library(knitr)
+library(DESeq2)
+library(ggplot2) # Plotting
+library(cowplot) # Plotting multiple plots in array
+# library(topGO) # Perform enrichment analysis
+# library(dplyr) # Do not load, just directly use in inline codes
+# library(tidyr) # Do not load, just directly use in inline codes
+library(msigdbr) # Databases needed for fgsea
+library(fgsea) # Perform GSEA
+library(DT) # need to be loaded later than fgsea
+library(pheatmap)
+```
+
+# Function
+All necessary functions
+```{r warning=FALSE, message=FALSE, results='hold'}
+## Get GSEA plot (bar plot, p value)
+get_fgsea_plot <- function(df,Organ,ylim){
+  Organ <- Organ
+  df <- df
+  ylim <- ylim
+  df <- df %>%
+    dplyr::mutate(Regulation = ifelse(NES > 0, "Up", "Down")) %>%
+    dplyr::mutate(log_padj_mutated = ifelse(NES > 0, -log10(padj), log10(padj)))
+  df_up <- df %>%
+    dplyr::arrange(desc(NES)) %>%
+    slice(1:5)
+  df_down <- df %>%
+    dplyr::arrange(NES) %>%
+    slice(1:5)
+  df_subset <- rbind(df_up,df_down)
+  
+  p.fgsea <- ggplot(df_subset,aes(x=reorder(pathway,log_padj_mutated),y=log_padj_mutated,fill=factor(Regulation))) + 
+    geom_bar(stat='identity') + theme(panel.background = element_rect(fill = "white", colour = "black"),
+                                      panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+                                      plot.title = element_text(size = 7),
+                                      axis.title.y = element_blank(), axis.title.x = element_blank(),
+                                      axis.text= element_text(size = 5)) + 
+    geom_hline(yintercept = -log10(0.05)) + 
+    geom_hline(yintercept = log10(0.05)) + 
+    scale_fill_manual(values=c("blue","red")) +
+    ylim(-ylim,ylim)+
+    coord_flip() + labs(y='-log10(padj)',x='pathways')
+  return(p.fgsea)
+}
+
+## save plot as PDF files
+save_pdf <- function(x,type,Organ,age,condition) {
+  filename <- paste(paste(type,Organ,age,condition,sep="_"),".pdf",sep="")
+  ggsave(file.path(output_dir,filename),plot=x)
+}
+
+## save pheatmap
+save_pheatmap_pdf <- function(x, filename, width=7, height=7) {
+    stopifnot(!missing(x))
+    stopifnot(!missing(filename))
+    pdf(filename, width=width, height=height)
+    grid::grid.newpage()
+    grid::grid.draw(x$gtable)
+    dev.off()
+}
+```
+
+# Read data
+#Generate meta file dynamically and read data according to this meta file
+```{r warning=FALSE, message=FALSE, results='hold'}
+sample <- data.frame()
+dir <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/00_All_data_and_script_for_manuscript/05_figure4_Histone_CutandRun/data"
+data.list <- list()
+
+for (imarker in c("H3K4me1","H3K4me3","H3K27ac","H3K27me3")) {
+  for (ihour in c("00hr","48hr")){
+    
+  filename <- paste(ihour,"_",imarker,"_WT_KO_merge_annotated_tag_for_R",".txt",sep="")
+  file <- read.delim(file.path(dir,filename),sep="\t",skip=1,quote = "")
+  colnames(file) <- c("Row.names","Chr","Start","End","Gene Name","Annotation","Distance_to_nearest_RefSeq_TSS","WT_1","WT_2","JunBKO_1","JunBKO_2")
+  data.list[[imarker]][[ihour]] <- file
+  }
+}
+
+```
+
+# Meta data
+```{r warning=FALSE, message=FALSE, results='hold'}
+
+database <- data.frame(marker=rep(c("H3K4me1","H3K4me3","H3K27ac","H3K27me3"),each=4,times=2),
+                       hour=rep(c("00hr","48hr"),each=16),
+                       condition=rep(c("WT","JunBKO"),each=2,times=8),
+                       replicate=(rep(c("1","2"),times=16))
+                       )
+database$rowname <-paste(database$marker,database$hour,database$condition,database$replicate,sep="_")
+
+
+```
+
+# Generate count matrix
+```{r warning=FALSE, message=FALSE, results='hold'}
+matrix.list <- list()
+
+for (imarker in c("H3K4me1","H3K4me3","H3K27ac","H3K27me3")) {
+  for (ihour in c("00hr","48hr")){
+ 
+  file <- data.list[[imarker]][[ihour]]
+  countData <- as.matrix(file[8:11])
+  rownames(countData) <- file$Row.names
+  mode(countData) <- "integer"
+  matrix.list[[imarker]][[ihour]] <- countData
+  }
+}
+```
+
+# Differential expression analysis (ko vs wt)
+```{r warning=FALSE, message=FALSE, results='hold'}
+# res.list <- list()
+# for (imarker in c("H3K4me1","H3K4me3","H3K27ac","H3K27me3")) {
+#   for (ihour in c("00hr","48hr")){
+# 
+#     input <-  matrix.list[[imarker]][[ihour]]
+#     database.subset <- database %>%
+#       dplyr::filter( marker == imarker) %>%
+#           dplyr::filter( hour == ihour)
+#     dds <- DESeqDataSetFromMatrix(input, colData=database.subset, design= ~ condition)
+#   dds <- dds[ rowSums(counts(dds)) > 1, ]
+#   dds <- DESeq(dds)
+#   res <- results(dds,contrast=c("condition","JunBKO","WT"))
+#   resdata <- merge(as.data.frame(res),
+#                    as.data.frame(counts(dds,normalized=TRUE)),
+#                    by="row.names",sort=FALSE)
+#   resdata[["padj"]][is.na(resdata[["padj"]])] <- 1
+#   resdata[["pvalue"]][is.na(resdata[["pvalue"]])] <- 1
+#   res.list[[imarker]][[ihour]] <- resdata
+#   }
+#   }
+# rds_dir <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/00_All_data_and_script_for_manuscript/05_figure4_Histone_CutandRun/data"
+# saveRDS(res.list,file.path(rds_dir,"res_list_no_distance_restriction.rds"))
+```
+
+
+# Differential expression analysis (ko vs wt)
+```{r warning=FALSE, message=FALSE, results='hold'}
+rds_dir <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/00_All_data_and_script_for_manuscript/05_figure4_Histone_CutandRun/data"
+res.list <- readRDS(file.path(rds_dir,"res_list_no_distance_restriction.rds"))
+
+```
+
+#annotation
+```{r warning=FALSE, message=FALSE, results='hold'}
+final.list <- list()
+for (imarker in c("H3K4me1","H3K4me3","H3K27ac","H3K27me3")) {
+  for (ihour in c("00hr","48hr")){
+     resdata <-  res.list[[imarker]][[ihour]]
+     file <- data.list[[imarker]][[ihour]]
+onlyname <-subset(file,select=c("Row.names","Chr","Start","End","Gene Name","Annotation","Distance_to_nearest_RefSeq_TSS"))
+finaltable <- merge(resdata,onlyname,by="Row.names",sort=FALSE)
+
+#scatter plot tag data only by log2FC
+finaltable$WT_mean <- rowMeans(finaltable[,c(8,9)], na.rm=TRUE)
+finaltable$KO_mean <- rowMeans(finaltable[,c(10,11)], na.rm=TRUE)
+finaltable$WT_mean_log2 <- log(finaltable[,c('WT_mean')], 2)
+finaltable$KO_mean_log2 <- log(finaltable[,c('KO_mean')], 2)
+final.list[[imarker]][[ihour]] <- finaltable
+  
+# savedir_table <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/exp163-cutandrun_renanalysis/03_table/no_filtered"
+# write.table(finaltable,file.path(savedir_table,paste("Cut_and_Runseq_",imarker,"_",ihour,"_KO_WT",".txt",sep="")), quote= F, sep = "\t",row.names = F)
+
+}
+}
+```
+
+
+#FDR<0.05,log2FC0.585 (1.5fold),baseMean >10
+```{r warning=FALSE, message=FALSE, results='hold'}
+#add color by using tag only data
+
+log2FC <- 0.585
+FDR <- 0.05
+baseMean_value <- 10
+
+for (imarker in c("H3K4me1","H3K4me3","H3K27ac","H3K27me3")) {
+  for (ihour in c("00hr","48hr")){
+  finaltable <- final.list[[imarker]] [[ihour]]
+finaltable$color <- ifelse(finaltable$padj < FDR & abs(finaltable$log2FoldChange) >= log2FC & finaltable$baseMean >baseMean_value,ifelse(finaltable$log2FoldChange > log2FC & finaltable$baseMean >baseMean_value ,'red','blue'),'gray')
+
+#count the log2FC
+library(dplyr)
+df_ko <- dplyr::filter(finaltable, padj < FDR & log2FoldChange > log2FC & baseMean >baseMean_value)
+df_ko_gene <- as.matrix(df_ko$`Gene Name`)
+df_wt <- dplyr::filter(finaltable, padj < FDR & log2FoldChange < -log2FC & baseMean >baseMean_value)
+df_wt_gene <- as.matrix(df_wt$`Gene Name`)
+
+df <- dplyr::filter(finaltable, padj < FDR & abs(log2FoldChange) > log2FC & baseMean >baseMean_value)
+df_gene <- as.matrix(df$`Gene Name`)
+
+paste("ko=",nrow(df_ko))
+paste("wt=",nrow(df_wt))
+
+nodifference <-nrow(finaltable)- nrow(df_ko)-nrow(df_wt)
+totalACRs<-nrow(finaltable)
+paste(nodifference)
+
+# savedir_table <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/exp163-cutandrun_renanalysis/03_table/filtered/FDR0.05_log2FC_higer_0.585_basemean10"
+# 
+# write.table(df_ko,file.path(savedir_table,paste("Cut_and_Runseq_",imarker,"_",ihour,"_KO_WT","_baseMean",baseMean_value,"_FDR",FDR,"_log2FC_higer_than_",log2FC,".txt",sep="")), quote= F, sep = "\t",row.names = F)
+# 
+# savedir_table <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/exp163-cutandrun_renanalysis/03_table/filtered/FDR0.05_log2FC_lower_0.585_basemean10"
+# 
+# write.table(df_ko,file.path(savedir_table,paste("Cut_and_Runseq_",imarker,"_",ihour,"_KO_WT","_baseMean",baseMean_value,"_FDR",FDR,"_log2FC_lower_than_",log2FC,".txt",sep="")), quote= F, sep = "\t",row.names = F)
+# 
+# savedir_table <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/exp163-cutandrun_renanalysis/03_table/filtered/FDR0.05_abslog2FC0.585_basemean10"
+# 
+# write.table(df_ko,file.path(savedir_table,paste("Cut_and_Runseq_",imarker,"_",ihour,"_KO_WT","_baseMean",baseMean_value,"_FDR",FDR,"_abslog2FC_",log2FC,".txt",sep="")), quote= F, sep = "\t",row.names = F)
+
+  }
+}
+```
+
+
+# scatter plot: plot total ACRs using gray color
+```{r warning=FALSE, message=FALSE, results='hold'}
+library(ggplot2)
+color<- c(red = "red", gray = "gray", blue ="blue")
+
+for (imarker in c("H3K4me1","H3K4me3","H3K27ac","H3K27me3")) {
+  for (ihour in c("00hr","48hr")){
+  finaltable <- final.list[[imarker]][[ihour]]
+
+finaltable$color <- ifelse(finaltable$padj < FDR & abs(finaltable$log2FoldChange) >= log2FC & finaltable$baseMean >baseMean_value,ifelse(finaltable$log2FoldChange > log2FC & finaltable$baseMean >baseMean_value ,'red','blue'),'gray')
+
+#count the log2FC
+
+library(dplyr)
+df_ko <- dplyr::filter(finaltable, padj < FDR & log2FoldChange > log2FC & baseMean >baseMean_value)
+df_ko_gene <- as.matrix(df_ko$`Gene Name`)
+df_wt <- dplyr::filter(finaltable, padj < FDR & log2FoldChange < -log2FC & baseMean >baseMean_value)
+df_wt_gene <- as.matrix(df_wt$`Gene Name`)
+
+df <- dplyr::filter(finaltable, padj < FDR & abs(log2FoldChange) > log2FC & baseMean >baseMean_value)
+df_gene <- as.matrix(df$`Gene Name`)
+
+paste("ko=",nrow(df_ko))
+paste("wt=",nrow(df_wt))
+
+totalACRs<-nrow(finaltable)-nrow(df_wt)-nrow(df_ko)
+
+
+p <- ggplot(finaltable, aes(WT_mean_log2, KO_mean_log2, col= color)) +
+  geom_point(size = 0.8) +
+  theme_bw() +
+  scale_color_manual(values = color) +
+  labs(x="WT tags (log2)",y="JunB-KO tags (log2)")+
+  ggtitle(imarker) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "none",
+        panel.grid=element_blank(),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 14))+
+  annotate("text", x=Inf,y=Inf, hjust=1,vjust=1,label = totalACRs ,size= 8,col= "gray" )+
+  scale_x_continuous(limits = c(0, 12), breaks = seq(0, 12, by = 4))+
+  scale_y_continuous(limits = c(0, 12), breaks = seq(0, 12, by = 4))+
+  annotate("text", x=Inf,y=-Inf, hjust=1,vjust=0,label =nrow(df_wt),size= 8,col= "blue" )+
+  annotate("text", x=-Inf,y=Inf, hjust=0,vjust=1,label =nrow(df_ko),size= 8,col= "red")
+p
+
+
+savedir_png <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/00_All_data_and_script_for_manuscript/05_figure4_Histone_CutandRun/plot"
+
+ggsave(file.path(savedir_png,paste("Cut_and_Runseq_",imarker,"_",ihour,"_KO_WT","_baseMean",baseMean_value,"_FDR",FDR,"_abslog2FC_",log2FC,"_totalACRs.png",sep="")), width = 4, height = 4)
+
+}
+}
+```
+
+
+
+
+#lable based on genes you want
+```{r warning=FALSE, message=FALSE, results='hold'}
+
+library(ggplot2)
+color<- c(red = "red", gray = "gray", blue ="blue")
+
+for (imarker in c("H3K4me1","H3K4me3","H3K27ac","H3K27me3")) {
+  for (ihour in c("00hr","48hr")){
+    
+# imarker <-"H3K4me1"
+# ihour <- "48hr"
+  finaltable <- final.list[[imarker]][[ihour]]
+
+finaltable$color <- ifelse(finaltable$padj < FDR & abs(finaltable$log2FoldChange) >= log2FC & finaltable$baseMean >baseMean_value,ifelse(finaltable$log2FoldChange > log2FC & finaltable$baseMean >baseMean_value ,'red','blue'),'gray')
+
+#count the log2FC
+
+library(dplyr)
+df_ko <- dplyr::filter(finaltable, padj < FDR & log2FoldChange > log2FC & baseMean >baseMean_value)
+df_ko_gene <- as.matrix(df_ko$`Gene Name`)
+df_wt <- dplyr::filter(finaltable, padj < FDR & log2FoldChange < -log2FC & baseMean >baseMean_value)
+df_wt_gene <- as.matrix(df_wt$`Gene Name`)
+
+df <- dplyr::filter(finaltable, padj < FDR & abs(log2FoldChange) > log2FC & baseMean >baseMean_value)
+df_gene <- as.matrix(df$`Gene Name`)
+
+paste("ko=",nrow(df_ko))
+paste("wt=",nrow(df_wt))
+
+totalACRs<-nrow(finaltable)-nrow(df_wt)-nrow(df_ko)
+
+p <- ggplot(finaltable, aes(WT_mean_log2, KO_mean_log2, col= color)) +
+  geom_point(size = 0.8) +
+  theme_bw() +
+  scale_color_manual(values = color) +
+  labs(x="WT tags (log2)",y="JunB-KO tags (log2)")+
+  ggtitle(imarker) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "none",
+        panel.grid=element_blank(),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 14))+
+  annotate("text", x=Inf,y=Inf, hjust=1,vjust=1,label = totalACRs ,size= 8,col= "gray" )+
+  scale_x_continuous(limits = c(0, 12), breaks = seq(0, 12, by = 4))+
+  scale_y_continuous(limits = c(0, 12), breaks = seq(0, 12, by = 4))+
+  annotate("text", x=Inf,y=-Inf, hjust=1,vjust=0,label =nrow(df_wt),size= 8,col= "blue" )+
+  annotate("text", x=-Inf,y=Inf, hjust=0,vjust=1,label =nrow(df_ko),size= 8,col= "red")
+p
+
+finaltable$`Gene Name`<-as.character(finaltable$`Gene Name`)
+finaltable$genelabels <- ifelse(
+                        finaltable$`Gene Name` == "Il23r" & finaltable$color == 'blue'|
+                        finaltable$`Gene Name` == "Il21" & finaltable$color == 'blue'|
+                        finaltable$`Gene Name` == "Ifng" & finaltable$color == 'red'|
+                        finaltable$`Gene Name` == "Stat5a" & finaltable$color == 'red'|
+                        finaltable$`Gene Name` == "Irf8" & finaltable$color == 'red'|
+                        finaltable$`Gene Name` == "Il17a" & finaltable$color == 'blue'                
+                        , finaltable$`Gene Name`,"")
+
+head(finaltable)
+
+
+#for specific gene name
+library(ggrepel)
+q <- p +
+ggrepel::geom_text_repel(label = finaltable$genelabels, max.overlaps = Inf,colour='black') 
+q
+
+savedir_png <- "/Users/chien/Library/CloudStorage/OneDrive-OIST/data/00_All_data_and_script_for_manuscript/05_figure4_Histone_CutandRun/plot"
+
+ggsave(file.path(savedir_png,paste("Cut_and_Runseq_",imarker,"_",ihour,"_KO_WT","_baseMean",baseMean_value,"_FDR",FDR,"_abslog2FC_",log2FC,"_totalACRs_label_name.png",sep="")), width = 4, height = 4)
+
+}
+}
+
+```

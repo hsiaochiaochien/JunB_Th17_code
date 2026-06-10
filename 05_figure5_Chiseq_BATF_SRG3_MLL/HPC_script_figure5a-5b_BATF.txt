@@ -1,0 +1,243 @@
+ml sango-legacy-modules
+
+ml bowtie/1.1.2
+
+#module spider bowtie/1.1.2
+
+ilist=(/bucket/IshikawaU/HsiaoChiao/Chipseq_ID732_20231110/04_trimmomatic/*_R1_paired.fq.gz)
+
+input=${ilist[$SLURM_ARRAY_TASK_ID]}
+
+output=$(basename -s _R1_paired.fq.gz $input)
+
+
+bowtie \
+--threads 32 \
+-a --strata --best -m 1 -v 2 \
+-S \
+/bucket/IshikawaU/HsiaoChiao/rync_sango/Hsiaochiao/mm10/Mus_musculus/UCSC/mm10/Sequence/BowtieIndex/genome \
+<(zcat $input) \
+> $output.sam
+
+#==========================================================================================================================================================
+
+
+module load picard/2.7.0
+
+#picard=(/apps/free72/picard/2.7.0/bin/picard.jar)
+
+ilist=(/bucket/IshikawaU/HsiaoChiao/Chipseq_ID732_20231110_bowtie1/01_bowtie1_koizumi/*.sam)
+input_sam=${ilist[$SLURM_ARRAY_TASK_ID]}
+sorted_sam=$(basename -s .sam $input_sam)_sorted.sam
+
+## Sort by coordinate
+#java -jar $picard SortSam \
+picard SortSam \
+I=$input_sam \
+O=$sorted_sam \
+SORT_ORDER=coordinate
+
+
+
+#==========================================================================================================================================================
+
+module load picard/2.7.0
+
+ilist=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/02_picard_Sort_by_coordinate/*sorted.sam)
+input_sam=${ilist[$SLURM_ARRAY_TASK_ID]}
+output=$(basename -s _sorted.sam $input_sam)_rmDup.sam
+outputM=$(basename -s _sorted.sam $input_sam)_rmDup.txt
+path="/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/03_picard_remove_duplicate"
+
+mkdir -p $path/picard_summary
+mkdir -p $path/rmDup_sam
+
+picard MarkDuplicates \
+I=$input_sam \
+O=$path/rmDup_sam/$output \
+M=$path/picard_summary/$outputM \
+REMOVE_DUPLICATES=true
+
+
+#==========================================================================================================================================================
+
+module load samtools/1.9
+
+mkdir -p ./01_mapped_bam
+
+path="/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/04_samtools_keep_mapped_read"
+
+ilist=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/03_picard_remove_duplicate/rmDup_sam/*_rmDup.sam)
+
+input_sam=${ilist[$SLURM_ARRAY_TASK_ID]}
+
+output=$(basename -s .sam $input_sam)_mapped.bam
+
+
+samtools view -@ 8 -bS -F 0x4 $input_sam > $path/01_mapped_bam/$output
+
+
+#==========================================================================================================================================================
+
+
+module load homer/v4.11
+module load samtools/1.9
+
+mkdir -p ./01_bedGraph_fragLength_given_res_10
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/05_homer_generate_bedGraph_for_UCSC/01_TagDirectory/*_S*)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/01_homer_generate_bedgraph_for_deeptools_heatmap)
+outputname=$(basename $input).bedGraph
+
+makeUCSCfile $input -fragLength given -res 10 > $outputdir/01_bedGraph_fragLength_given_res_10/$outputname
+
+# #makeUCSCfile <tag directory> -fragLength given -res 10 > UCSCbrowsertracks/
+
+
+#==========================================================================================================================================================
+step: sort_bedGraph.sh
+
+mkdir -p ./02_bedGraph_fragLength_given_res_10_sorted
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/01_homer_generate_bedgraph_for_deeptools_heatmap/01_bedGraph_fragLength_given_res_10/*.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/01_homer_generate_bedgraph_for_deeptools_heatmap)
+outputname=$(basename -s .bedGraph $input)_sorted.bedGraph
+
+sort -k1,1 -k2,2n $input > $outputdir/02_bedGraph_fragLength_given_res_10_sorted/$outputname
+
+#==========================================================================================================================================================
+step : sed_remove_track_line.sh
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/01_homer_generate_bedgraph_for_deeptools_heatmap/02_bedGraph_fragLength_given_res_10_sorted/*_sorted.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+#remove track line (now at the end of sort files)
+sed -i '$d' $input
+
+
+
+#==========================================================================================================================================================
+step:bedClip_remove_extensions_beyond_chromosomes
+
+mkdir -p ./04_bedGraph_fragLength_given_res_10_sorted_final
+
+Path_to_UCSCtools=(/apps/unit/IshikawaU/UCSC_tools)
+mm10chrsizes=(/apps/unit/IshikawaU/UCSC_tools/mm10.chrom.sizes)
+
+#fix extensions beyond chromosomes > removes entry
+#bedClip [options] input.bed chrom.sizes output.bed
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/01_homer_generate_bedgraph_for_deeptools_heatmap/02_bedGraph_fragLength_given_res_10_sorted/*sorted.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/01_homer_generate_bedgraph_for_deeptools_heatmap//04_bedGraph_fragLength_given_res_10_sorted_final)
+outputname=$(basename -s _sorted.bedGraph $input)_sorted2.bedGraph
+
+$Path_to_UCSCtools/bedClip $input $mm10chrsizes $outputdir/$outputname
+
+
+#==========================================================================================================================================================
+
+
+mkdir -p ./01_bigWig_fragLength_given_res_10
+
+Path_to_UCSCtools=(/apps/unit/IshikawaU/UCSC_tools)
+mm10chrsizes=(/apps/unit/IshikawaU/UCSC_tools/mm10.chrom.sizes)
+
+#bedGraphToBigWig in.bedGraph chrom.sizes out.bw
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/01_homer_generate_bedgraph_for_deeptools_heatmap/04_bedGraph_fragLength_given_res_10_sorted_final/*sorted2.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/02_generate_bigWig_for_deeptools_heatmap/01_bigWig_fragLength_given_res_10)
+outputname=$(basename -s _sorted.bedGraph $input).bw
+
+$Path_to_UCSCtools/bedGraphToBigWig $input $mm10chrsizes $outputdir/$outputname
+
+#==========================================================================================================================================================
+steps: for getting matrix to R
+module load deeptools/v3.5.1
+
+path_file_bed=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/07_deeptools_heatmap_JunB_dependent_atac_histone/03_differential_bed_file_atac/log2FC_based)
+bed_1=(ATAC_invitro_Th1723_FDR0.05_log2FC_less1_all.bed)
+
+path_file_bed_2=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/08_macs2_callPeak/02_merge_same_condition_files/result)
+bed_2=(BATF_WT_24h_merge_summits.bed)
+
+path_file_Chip_24h_bigWig=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/02_generate_bigWig_for_deeptools_heatmap/01_bigWig_fragLength_given_res_10)
+BATF_BigWig_WT1=(Chipseq_09_BATF_wt1_*)
+BATF_BigWig_WT2=(Chipseq_09_BATF_wt2_*)
+BATF_BigWig_WT3=(Chipseq_09_BATF_wt3_*)
+BATF_BigWig_JunBKO1=(Chipseq_10_BATF_JUNBKO1_*)
+BATF_BigWig_JunBKO2=(Chipseq_10_BATF_JUNBKO2_*)
+BATF_BigWig_JunBKO3=(Chipseq_10_BATF_JUNBKO3_*)
+
+#figure5a
+computeMatrix reference-point -S \
+                                $path_file_Chip_24h_bigWig/$BATF_BigWig_WT1\
+                                $path_file_Chip_24h_bigWig/$BATF_BigWig_WT2\
+                                $path_file_Chip_24h_bigWig/$BATF_BigWig_WT3\
+                                $path_file_Chip_24h_bigWig/$BATF_BigWig_JunBKO1\
+                                $path_file_Chip_24h_bigWig/$BATF_BigWig_JunBKO2\
+                                $path_file_Chip_24h_bigWig/$BATF_BigWig_JunBKO3\
+                                -R $path_file_bed_2/$bed_2 \
+                                -a 1000 \
+                                -b 1000 \
+                                --referencePoint center \
+                                -p 32 \
+                                --skipZeros \
+                                --missingDataAsZero \
+                                --outFileNameMatrix matrix_BATF_24hr_bed_WT_JunBKO_1k.tab \
+                                -o matrix_BATF_24hr_bed_WT_JunBKO_1k.gz
+
+
+#figure5b
+computeMatrix reference-point -S \
+                                $path_file_Chip_60h_bigWig/$BATF_BigWig_WT1\
+                                $path_file_Chip_60h_bigWig/$BATF_BigWig_WT2\
+                                $path_file_Chip_60h_bigWig/$BATF_BigWig_WT3\
+                                $path_file_Chip_60h_bigWig/$BATF_BigWig_JunBKO1\
+                                $path_file_Chip_60h_bigWig/$BATF_BigWig_JunBKO2\
+                                $path_file_Chip_60h_bigWig/$BATF_BigWig_JunBKO3\
+                                -R $path_file_bed/$bed_1 \
+                                -a 1000 \
+                                -b 1000 \
+                                --referencePoint center \
+                                -p 32 \
+                                --skipZeros \
+                                --missingDataAsZero \
+                                --outFileNameMatrix  matrix_JunB_less_ACRs_aBATF_WT_JunBKO.tab \
+                                --outFileName  matrix_JunB_less_ACRs_aBATF_WT_JunBKO.gz
+
+#==========================================================================================================================================================
+
+module load deeptools/v3.5.1.new
+
+#figure 5a
+input_path=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/03_deeptool_computeMatri_JunBATAC_BAF155_BRG1_MLL4_WDR5/reference_point_batf_24hr_bed)
+input_file=(matrix_BATF_24hr_bed_WT_JunBKO_1k_one_sample.gz)
+plotHeatmap  -m $input_path/$input_file \
+                --colorMap Reds \
+                --samplesLabel 'WT1' 'JunBKO1' \
+                --regionsLabel 'peaks' \
+                --legendLocation none \
+                -out BATF_24hr_Chip_WT_JunBKO_1k_one_sample.png
+
+module load deeptools/v3.5.1.new
+
+#figure 5b
+input_path=(/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/03_deeptool_computeMatri_JunBATAC_BAF155_BRG1_MLL4_WDR5/reference_point_batf_24hr_bed) 
+input_file=(matrix_JunB_ATAC_less_ACRs_aBATF_WT_KO_one_sample.gz)
+
+plotHeatmap -m $input_path/$input_file \
+                --colorMap Reds \
+                --samplesLabel 'WT1' 'JunBKO1' \
+                --regionsLabel 'peaks' \
+                --legendLocation none \
+                -out ATAC_bed_log2FCless1_FDR0.05_BATF_1k_one_sample.png
+
+

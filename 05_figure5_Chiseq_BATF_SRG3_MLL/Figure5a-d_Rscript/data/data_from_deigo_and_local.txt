@@ -1,0 +1,13 @@
+scp 
+"deigo-ext://flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/07_deeptool_computeMatri_JunBATAC_BAF155_BRG1_MLL4_WDR5_for_R_line_plot/reference_point_atac_bed_less1/*.txt" .
+
+scp "deigo-ext:/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/07_deeptool_computeMatri_JunBATAC_BAF155_BRG1_MLL4_WDR5_for_R_line_plot/reference_point_atac_bed_more1/*txt" .
+
+scp 
+"deigo-ext:/flash/IshikawaU/HsiaoChiao/Chipseq_20231110/process2_bowtie1/12_deeptools_heatmap_JunBACRs/07_deeptool_computeMatri_JunBATAC_BAF155_BRG1_MLL4_WDR5_for_R_line_plot/reference_point_batf_24hr_bed/*txt" 
+.
+
+
+From 
+
+/Users/chien/Library/CloudStorage/OneDrive-OIST/data/exp164-deeptools_generate_mean_plot/01_data_from_deigo

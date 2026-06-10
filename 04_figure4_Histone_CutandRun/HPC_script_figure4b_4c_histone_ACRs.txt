@@ -1,0 +1,244 @@
+#==========================================================================================================================================================
+step: bowtie2
+
+projPath="/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/04.1_bowtie2"
+
+mkdir -p ${projPath}/bowtie2_summary
+
+module load bowtie2/2.3.4.3
+
+dataPath=/bucket/IshikawaU/HsiaoChiao/cut_and_run_data/ID403/data/no_trim/Th17_23_ID403_cut_and_run
+
+ilist_R1=($dataPath/*_R1_001.fastq.gz)
+ilist_R2=($dataPath/*_R2_001.fastq.gz)
+input_R1=${ilist_R1[$SLURM_ARRAY_TASK_ID]}
+input_R2=${ilist_R2[$SLURM_ARRAY_TASK_ID]}
+
+output=$(basename -s _R1_001.fastq.gz $input_R1)
+
+bowtie2 \
+--local \
+--very-sensitive-local \
+--no-unal \
+--no-mixed \
+--no-discordant \
+--phred33 \
+--threads 30 \
+-I 10 \
+-X 700 \
+-x /bucket/IshikawaU/HsiaoChiao/rync_sango/Hsiaochiao/mm10/Mus_musculus/UCSC/mm10/Sequence/Bowtie2Index/genome \
+-1 $input_R1 \
+-2 $input_R2 \
+-S ${projPath}/sam/$output.sam &> ${projPath}/bowtie2_summary/$output.txt
+
+
+#==========================================================================================================================================================
+step
+module load picard/2.7.0
+
+#picard=(/apps/free72/picard/2.7.0/bin/picard.jar)
+
+ilist=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/04.1_bowtie2/sam/*.sam)
+input_sam=${ilist[$SLURM_ARRAY_TASK_ID]}
+sorted_sam=$(basename -s .sam $input_sam)_sorted.sam
+
+## Sort by coordinate
+#java -jar $picard SortSam \
+picard SortSam \
+I=$input_sam \
+O=$sorted_sam \
+SORT_ORDER=coordinate
+
+#==========================================================================================================================================================
+module load picard/2.7.0
+
+ilist=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/05.1_picard_Sort_by_coordinate/*_sorted.sam)
+input_sam=${ilist[$SLURM_ARRAY_TASK_ID]}
+output=$(basename -s _sorted.sam $input_sam)_rmDup.sam
+outputM=$(basename -s _sorted.sam $input_sam)_rmDup.txt
+path="/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/06.1_picard_remove_duplicate"
+
+mkdir -p $path/picard_summary
+mkdir -p $path/rmDup_sam
+
+picard MarkDuplicates \
+I=$input_sam \
+O=$path/rmDup_sam/$output \
+M=$path/picard_summary/$outputM \
+REMOVE_DUPLICATES=true
+
+
+#==========================================================================================================================================================
+module load samtools/1.9
+
+mkdir -p ./01_mapped_bam
+
+path="/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/08.1_samtools_keep_mapped_read"
+
+ilist=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/06.1_picard_remove_duplicate/01_rmDup_sam/*_rmDup.sam)
+
+input_sam=${ilist[$SLURM_ARRAY_TASK_ID]}
+
+output=$(basename -s .sam $input_sam)_mapped.bam
+
+
+samtools view -@ 8 -bS -F 0x4 $input_sam > $path/01_mapped_bam/$output
+
+
+#==========================================================================================================================================================
+
+
+module load homer/v4.11
+module load samtools/1.9
+
+mkdir -p ./01_TagDirectory
+
+path="/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/09.1_homer_generate_bedGraph_for_UCSC"
+
+ilist=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/08.1_samtools_keep_mapped_read/01_mapped_bam/*_rmDup_mapped.bam)
+
+input=${ilist[$SLURM_ARRAY_TASK_ID]}
+
+output=$(basename -s _rmDup_mapped.bam $input)
+
+makeTagDirectory $path/01_TagDirectory/$output $input
+
+
+#==========================================================================================================================================================
+
+
+module load homer/v4.11
+module load samtools/1.9
+
+mkdir -p ./01_bedGraph_fragLength_given_res_10
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/09.1_homer_generate_bedGraph_for_UCSC/01_TagDirectory/*_S*)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/06_deeptools_heatmap/01_homer_generate_bedgraph)
+outputname=Cut_and_Run_$(basename $input).bedGraph
+
+makeUCSCfile $input -fragLength given -res 10 > $outputdir/01_bedGraph_fragLength_given_res_10/$outputname
+
+#==========================================================================================================================================================
+step: sort_bedGraph.sh
+
+
+mkdir -p ./02_bedGraph_fragLength_given_res_10_sorted
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/06_deeptools_heatmap/01_homer_generate_bedgraph/01_bedGraph_fragLength_given_res_10/*.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/06_deeptools_heatmap/01_homer_generate_bedgraph)
+outputname=$(basename -s .bedGraph $input)_sorted.bedGraph
+
+sort -k1,1 -k2,2n $input > $outputdir/02_bedGraph_fragLength_given_res_10_sorted/$outputname
+
+#==========================================================================================================================================================
+step : sed_remove_track_line.sh
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/06_deeptools_heatmap/01_homer_generate_bedgraph/02_bedGraph_fragLength_given_res_10_sorted/*_sorted.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+#remove track line (now at the end of sort files)
+sed -i '$d' $input
+
+#==========================================================================================================================================================
+step:bedClip_remove_extensions_beyond_chromosomes
+
+mkdir -p ./04_bedGraph_fragLength_given_res_10_sorted_final
+
+Path_to_UCSCtools=(/apps/unit/IshikawaU/UCSC_tools)
+mm10chrsizes=(/apps/unit/IshikawaU/UCSC_tools/mm10.chrom.sizes)
+
+#fix extensions beyond chromosomes > removes entry
+#bedClip [options] input.bed chrom.sizes output.bed
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/06_deeptools_heatmap/01_homer_generate_bedgraph/02_bedGraph_fragLength_given_res_10_sorted/*sorted.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/06_deeptools_heatmap/01_homer_generate_bedgraph/04_bedGraph_fragLength_given_res_10_sorted_final)
+outputname=$(basename -s _sorted.bedGraph $input)_sorted2.bedGraph
+
+$Path_to_UCSCtools/bedClip $input $mm10chrsizes $outputdir/$outputname
+
+#==========================================================================================================================================================
+
+mkdir -p ./01_bigWig_fragLength_given_res_10
+
+Path_to_UCSCtools=(/apps/unit/IshikawaU/UCSC_tools)
+mm10chrsizes=(/apps/unit/IshikawaU/UCSC_tools/mm10.chrom.sizes)
+
+#bedGraphToBigWig in.bedGraph chrom.sizes out.bw
+
+idirectory=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/06_deeptools_heatmap/01_homer_generate_bedgraph/04_bedGraph_fragLength_given_res_10_sorted_final/*_sorted2.bedGraph)
+input=${idirectory[$SLURM_ARRAY_TASK_ID]}
+
+outputdir=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/06_deeptools_heatmap/02_generate_bigWig/01_bigWig_fragLength_given_res_10)
+outputname=$(basename -s _sorted2.bedGraph $input).bw
+
+$Path_to_UCSCtools/bedGraphToBigWig $input $mm10chrsizes $outputdir/$outputname
+
+#==========================================================================================================================================================
+module load deeptools/v3.5.1
+
+path_file_bed=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/07.1_deeptools_heatmap_JunB_dependent_atac_histone_exp114_new/03_differential_bed_file_atac/log2FC_based/*.bed)
+input_bed=${path_file_bed[$SLURM_ARRAY_TASK_ID]}
+output=$(basename -s .bed $input_bed)_bed_histone_5k.gz
+
+k=5000
+
+path_file_bigWig=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/06_deeptools_heatmap/02_generate_bigWig/01_bigWig_fragLength_given_res_10)
+bigWig_1=(Cut_and_Run_48hr_09_Th1723_H3K4me1_WT1_S93.bw)
+bigWig_3=(Cut_and_Run_48hr_11_Th1723_H3K4me1_JunBKO1_S95.bw)
+bigWig_5=(Cut_and_Run_48hr_05_Th1723_H3K27me3_WT1_S89.bw)
+bigWig_7=(Cut_and_Run_48hr_07_Th1723_H3K27me3_JunBKO1_S91.bw)
+bigWig_9=(Cut_and_Run_48hr_01_Th1723_H3K4me3_WT1_S85.bw)
+bigWig_11=(Cut_and_Run_48hr_03_Th1723_H3K4me3_JunBKO1_S87.bw)
+bigWig_13=(Cut_and_Run_48hr_13_Th1723_H3K27ac_WT1_S97.bw)
+bigWig_15=(Cut_and_Run_48hr_15_Th1723_H3K27ac_JunBKO1_S99.bw)
+
+
+computeMatrix reference-point -S \
+                                $path_file_bigWig/$bigWig_1 \
+                                $path_file_bigWig/$bigWig_3 \
+                                $path_file_bigWig/$bigWig_5 \
+                                $path_file_bigWig/$bigWig_7 \
+                                $path_file_bigWig/$bigWig_9 \
+                                $path_file_bigWig/$bigWig_11 \
+                                $path_file_bigWig/$bigWig_13 \
+                                $path_file_bigWig/$bigWig_15 \
+                                -R $input_bed \
+                                -a $k \
+                                -b $k \
+                                --referencePoint center \
+                                -p 32 \
+                                --skipZeros \
+                                --missingDataAsZero \
+                                -o $output
+
+
+#==========================================================================================================================================================
+
+module load deeptools/v3.5.1.new
+
+#https://www.plob.org/article/11392.html
+#plotHeatmap -m matrix1_ap2_chip_rep1_1_TSS.gz -out ExampleHeatmap1.png \
+
+ilist=(/flash/IshikawaU/HsiaoChiao/Cut_and_run/ID403/process/03.1_method_1_no_trim/13.1_Peak_density_heatmap_mergePeak_macs2_peakcalling/07.1_deeptools_heatmap_JunB_dependent_atac_histone_exp114_new/09_deeptool_computeMatri_JunBATAC_JunB_BATF_IRF4/log2FC_based/*only_histone_5k.gz)
+input_file=${ilist[$SLURM_ARRAY_TASK_ID]}
+
+
+output=$(basename -s .gz $input_file).png
+
+plotHeatmap  -m $input_path/$input_file \
+                --colorMap Reds \
+                --samplesLabel  'WT' 'JunBKO' 'WT' 'JunBKO' 'WT' 'JunBKO' 'WT' 'JunBKO' \
+                --regionsLabel 'peaks' \
+                -out $output
+
+#==========================================================================================================================================================
+
+
+
+
